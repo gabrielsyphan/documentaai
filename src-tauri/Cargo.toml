@@ -1,6 +1,6 @@
 [package]
 name = "documentaai"
-version = "0.1.0"
+version = "0.2.0"
 description = "DocumentaAI - Ferramenta de documentação pessoal"
 authors = []
 edition = "2021"
