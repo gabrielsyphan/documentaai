@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { useCreateBlockNote, FormattingToolbarController, FormattingToolbar, useBlockNoteEditor } from "@blocknote/react";
+import { useCreateBlockNote, FormattingToolbarController, FormattingToolbar, useBlockNoteEditor, SuggestionMenuController } from "@blocknote/react";
 import { BlockNoteView } from "@blocknote/mantine";
+import { WikiLink } from "./WikiLink";
 import { createHighlighter } from "shiki";
 import type { CodeBlockOptions } from "@blocknote/core";
+import { BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs, defaultStyleSpecs } from "@blocknote/core";
 import "@blocknote/mantine/style.css";
 import { usePagesStore } from "../../store/pages.store";
 import { useUIStore } from "../../store/ui.store";
@@ -11,7 +13,10 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { blocksToMarkdown, printToPdf } from "../../lib/export";
 import { saveCustomTemplate, stripBlockIds } from "../../lib/templates";
 import { tagColor, normalizeTag } from "../../lib/tags";
-import { FileDown, Printer, BookTemplate, X as XIcon, Tag } from "lucide-react";
+import { useTTS, countWords, type TTSState } from "../../lib/tts";
+import { saveVersion, getVersions } from "../../lib/db";
+import type { PageVersion } from "../../types";
+import { FileDown, FileText, Printer, BookTemplate, X as XIcon, Tag, Volume2, Pause, Play, Square, Maximize2, History, Link2, RotateCcw, HelpCircle } from "lucide-react";
 
 // Corrige o desaparecimento do toolbar ao mover o mouse de imagem/vídeo para ele.
 // WebKit (Tauri) inicia um HTML5 drag ao clicar+mover em elementos de mídia,
@@ -94,6 +99,12 @@ const SUPPORTED_LANGUAGES: CodeBlockOptions["supportedLanguages"] = {
 
 const SHIKI_LANGS = Object.keys(SUPPORTED_LANGUAGES).filter((l) => l !== "text");
 
+const editorSchema = BlockNoteSchema.create({
+  blockSpecs: defaultBlockSpecs,
+  inlineContentSpecs: { ...defaultInlineContentSpecs, wikilink: WikiLink },
+  styleSpecs: defaultStyleSpecs,
+});
+
 // Shiki v4 e @blocknote/core usam versões diferentes de @shikijs/types;
 // o cast é seguro pois a interface é estruturalmente compatível em runtime.
 const makeHighlighter: CodeBlockOptions["createHighlighter"] = () =>
@@ -105,9 +116,16 @@ const makeHighlighter: CodeBlockOptions["createHighlighter"] = () =>
 
 export default function Editor({ pageId }: Props) {
   const { pages, updatePage } = usePagesStore();
-  const { theme } = useUIStore();
+  const { theme, toggleFocusMode } = useUIStore();
+  const tts = useTTS();
   const page = pages.find((p) => p.id === pageId);
   const saveTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const versionTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const lastSavedContent = useRef<string | null>(null);
+  const lastEditorWrite = useRef<string | null>(null);
+  const [wordCount, setWordCount] = useState(0);
+  const [showHistory, setShowHistory] = useState(false);
+  const [versions, setVersions] = useState<PageVersion[]>([]);
 
   const initialContent = (() => {
     if (!page?.content) return undefined;
@@ -128,6 +146,7 @@ export default function Editor({ pageId }: Props) {
   }
 
   const editor = useCreateBlockNote({
+    schema: editorSchema,
     initialContent,
     uploadFile,
     codeBlock: {
@@ -138,18 +157,63 @@ export default function Editor({ pageId }: Props) {
   });
 
   useEffect(() => {
+    setWordCount(countWords(editor.document as object[]));
+    lastSavedContent.current = null;
+  }, [editor]);
+
+  useEffect(() => {
     const unsubscribe = editor.onChange(() => {
+      // Salva página (debounce 500ms)
       clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => {
-        updatePage(pageId, { content: JSON.stringify(editor.document) });
+        const content = JSON.stringify(editor.document);
+        lastEditorWrite.current = content;
+        updatePage(pageId, { content });
       }, 500);
+
+      // Atualiza contagem de palavras imediatamente
+      setWordCount(countWords(editor.document as object[]));
+
+      // Salva versão (debounce 15s)
+      clearTimeout(versionTimer.current);
+      versionTimer.current = setTimeout(() => {
+        const content = JSON.stringify(editor.document);
+        if (content !== lastSavedContent.current) {
+          lastSavedContent.current = content;
+          saveVersion(pageId, page?.title ?? "", content);
+        }
+      }, 15_000);
     });
 
     return () => {
       unsubscribe?.();
       clearTimeout(saveTimer.current);
+      // Salva versão ao sair da página se houver conteúdo não versionado
+      clearTimeout(versionTimer.current);
+      const content = JSON.stringify(editor.document);
+      if (content !== lastSavedContent.current) {
+        lastSavedContent.current = content;
+        saveVersion(pageId, page?.title ?? "", content);
+      }
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor, pageId]);
+
+  // Sincroniza o editor quando o conteúdo é alterado externamente
+  // (ex: quick-capture salva na daily note que está aberta)
+  useEffect(() => {
+    const storeContent = page?.content ?? null;
+    if (!storeContent) return;
+    if (storeContent === lastEditorWrite.current) return; // foi o próprio editor que escreveu
+    const editorContent = JSON.stringify(editor.document);
+    if (storeContent === editorContent) return; // já sincronizado
+    try {
+      const blocks = JSON.parse(storeContent);
+      editor.replaceBlocks(editor.document, blocks);
+      lastEditorWrite.current = storeContent;
+    } catch { /* ignore */ }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page?.content]);
 
   useEffect(() => {
     if (!isTauri()) return;
@@ -164,8 +228,7 @@ export default function Editor({ pageId }: Props) {
         const type = IMAGE_EXTS.has(ext) ? "image"
           : VIDEO_EXTS.has(ext) ? "video"
           : AUDIO_EXTS.has(ext) ? "audio"
-          : null;
-        if (!type) continue;
+          : "file";
 
         try {
           const url = convertFileSrc(path);
@@ -177,9 +240,14 @@ export default function Editor({ pageId }: Props) {
             reader.readAsDataURL(blob);
           });
 
+          const fileName = path.split(/[\\/]/).pop() ?? "arquivo";
+          const props = type === "file"
+            ? { url: base64, name: fileName }
+            : { url: base64 };
+
           const lastBlock = editor.document[editor.document.length - 1];
           editor.insertBlocks(
-            [{ type, props: { url: base64 } } as Parameters<typeof editor.insertBlocks>[0][0]],
+            [{ type, props } as Parameters<typeof editor.insertBlocks>[0][0]],
             lastBlock,
             "after",
           );
@@ -251,6 +319,25 @@ export default function Editor({ pageId }: Props) {
     });
   }
 
+  async function handleOpenHistory() {
+    const v = await getVersions(pageId);
+    setVersions(v);
+    setShowHistory(true);
+  }
+
+  function handleRestoreVersion(version: PageVersion) {
+    if (!version.content) return;
+    try {
+      const blocks = JSON.parse(version.content);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      editor.replaceBlocks(editor.document as any, blocks);
+      updatePage(pageId, { title: version.title, content: version.content });
+    } catch (e) {
+      console.error("Falha ao restaurar versão:", e);
+    }
+    setShowHistory(false);
+  }
+
   function handleTitleChange(e: React.ChangeEvent<HTMLInputElement>) {
     updatePage(pageId, { title: e.target.value });
   }
@@ -262,8 +349,15 @@ export default function Editor({ pageId }: Props) {
     }
   }
 
+  // Para TTS quando a página muda (Editor remonta via key={pageId})
+  useEffect(() => {
+    return () => { tts.stop(); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
     <>
+      {tts.speaking && <TTSBar tts={tts} />}
       <div className="editor-container">
         <div className="editor-topbar">
           <input
@@ -274,9 +368,30 @@ export default function Editor({ pageId }: Props) {
             placeholder="Sem título"
             autoFocus={!page?.title}
           />
-          <div className="export-wrapper" onMouseDown={(e) => e.stopPropagation()}>
+          <div className="topbar-actions" onMouseDown={(e) => e.stopPropagation()}>
             <button
-              className="export-btn"
+              className={`topbar-action-btn${tts.speaking ? " active" : ""}`}
+              onClick={tts.speaking ? tts.stop : () => tts.play(editor.document as object[])}
+              title={tts.speaking ? "Parar leitura" : "Ler em voz alta"}
+            >
+              <Volume2 size={15} />
+            </button>
+            <button
+              className="topbar-action-btn"
+              onClick={handleOpenHistory}
+              title="Histórico de versões"
+            >
+              <History size={15} />
+            </button>
+            <button
+              className="topbar-action-btn"
+              onClick={toggleFocusMode}
+              title="Modo foco (⌘⇧F)"
+            >
+              <Maximize2 size={15} />
+            </button>
+            <button
+              className="topbar-action-btn"
               onClick={() => setShowExport((v) => !v)}
               title="Exportar página"
             >
@@ -316,17 +431,236 @@ export default function Editor({ pageId }: Props) {
 
         <BlockNoteView editor={editor} theme={theme} formattingToolbar={false}>
           <FormattingToolbarController formattingToolbar={StableFormattingToolbar} />
+          <SuggestionMenuController
+            triggerCharacter="["
+            getItems={async (query) => {
+              const search = query.toLowerCase();
+              return pages
+                .filter((p) => p.type !== "daily" && (p.title || "").toLowerCase().includes(search))
+                .slice(0, 8)
+                .map((p) => ({
+                  title: p.title || "Sem título",
+                  subtext: p.type === "canvas" ? "Canvas" : "Documento",
+                  icon: p.emoji ? <span style={{ fontSize: 14 }}>{p.emoji}</span> : <FileText size={13} />,
+                  group: "Páginas",
+                  onItemClick: () => {
+                    editor.insertInlineContent([
+                      { type: "wikilink", props: { title: p.title || "Sem título", pageId: p.id } },
+                    ]);
+                  },
+                }));
+            }}
+          />
         </BlockNoteView>
+
+        <BacklinksSection pageId={pageId} />
       </div>
 
-      <TagEditor pageId={pageId} />
+      <TagEditor pageId={pageId} wordCount={wordCount} />
+
+      {showHistory && (
+        <VersionHistoryModal
+          versions={versions}
+          onClose={() => setShowHistory(false)}
+          onRestore={handleRestoreVersion}
+        />
+      )}
     </>
+  );
+}
+
+// ── TTS Bar ───────────────────────────────────────────────────────────────────
+
+function TTSBar({ tts }: { tts: TTSState }) {
+  return (
+    <div className="tts-bar">
+      <Volume2 size={13} className="tts-icon" />
+      <span className="tts-progress">{tts.currentIdx + 1}/{tts.totalChunks}</span>
+      <button
+        className="tts-ctrl-btn"
+        onClick={tts.paused ? tts.resume : tts.pause}
+        title={tts.paused ? "Continuar" : "Pausar"}
+      >
+        {tts.paused ? <Play size={13} /> : <Pause size={13} />}
+      </button>
+      <button className="tts-ctrl-btn" onClick={tts.stop} title="Parar">
+        <Square size={13} />
+      </button>
+      <div className="tts-divider" />
+      <span className="tts-label">Vel:</span>
+      {[0.75, 1, 1.25, 1.5, 2].map((r) => (
+        <button
+          key={r}
+          className={`tts-rate-btn${tts.rate === r ? " active" : ""}`}
+          onClick={() => tts.changeRate(r)}
+        >
+          {r}×
+        </button>
+      ))}
+      {tts.voices.length > 0 && (
+        <>
+          <div className="tts-divider" />
+          <select
+            className="tts-voice-select"
+            value={tts.voiceURI}
+            onChange={(e) => tts.setVoiceURI(e.target.value)}
+          >
+            {tts.voices.map((v) => (
+              <option key={v.voiceURI} value={v.voiceURI}>
+                {v.name} ({v.lang})
+              </option>
+            ))}
+          </select>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── Backlinks ─────────────────────────────────────────────────────────────────
+
+type AnyBlock = { type: string; content?: unknown[]; children?: AnyBlock[] };
+type AnyInline = { type: string; props?: Record<string, string> };
+
+function collectWikilinkIds(blocks: AnyBlock[]): string[] {
+  const ids: string[] = [];
+  function walk(b: AnyBlock) {
+    if (Array.isArray(b.content)) {
+      for (const item of b.content as AnyInline[]) {
+        if (item.type === "wikilink" && item.props?.pageId) ids.push(item.props.pageId);
+      }
+    }
+    if (Array.isArray(b.children)) b.children.forEach(walk);
+  }
+  blocks.forEach(walk);
+  return ids;
+}
+
+function BacklinksSection({ pageId }: { pageId: string }) {
+  const { pages, selectPage } = usePagesStore();
+  const page = pages.find((p) => p.id === pageId);
+  const title = page?.title?.trim();
+  if (!page) return null;
+
+  const backlinks = pages.filter((p) => {
+    if (p.id === pageId || !p.content) return false;
+    // Detect new-style wikilink inline content
+    try {
+      const blocks: AnyBlock[] = JSON.parse(p.content);
+      if (collectWikilinkIds(blocks).includes(pageId)) return true;
+    } catch { /* ignore */ }
+    // Detect old-style [[title]] text
+    if (title) {
+      const escaped = title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      return new RegExp(`\\[\\[${escaped}\\]\\]`, "i").test(p.content);
+    }
+    return false;
+  });
+
+  return (
+    <div className="backlinks-section">
+      <div className="backlinks-header">
+        <Link2 size={12} />
+        {backlinks.length > 0
+          ? `Mencionado em ${backlinks.length} ${backlinks.length === 1 ? "página" : "páginas"}`
+          : "Backlinks"}
+        <span
+          className="backlinks-help-icon"
+          data-tooltip="Digite [[ no editor para criar um link"
+        >
+          <HelpCircle size={11} />
+        </span>
+      </div>
+      {backlinks.length > 0 ? (
+        <div className="backlinks-list">
+          {backlinks.map((p) => (
+            <button key={p.id} className="backlink-item" onClick={() => selectPage(p.id)}>
+              <span className="backlink-icon">
+                {p.emoji ?? <FileText size={12} />}
+              </span>
+              {p.title || "Sem título"}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <p className="backlinks-empty">
+          Nenhuma página menciona esta ainda.{" "}
+          <span className="backlinks-empty-hint">
+            Digite <code>[[</code> em qualquer editor para criar um link.
+          </span>
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ── Version History ───────────────────────────────────────────────────────────
+
+function formatVersionDate(iso: string): string {
+  const d = new Date(iso);
+  const now = new Date();
+  const diffMin = Math.floor((now.getTime() - d.getTime()) / 60_000);
+  if (diffMin < 1) return "agora";
+  if (diffMin < 60) return `${diffMin} min atrás`;
+  const diffH = Math.floor(diffMin / 60);
+  if (diffH < 24) return `${diffH}h atrás`;
+  return d.toLocaleDateString("pt-BR", {
+    day: "2-digit", month: "2-digit", year: "numeric",
+    hour: "2-digit", minute: "2-digit",
+  });
+}
+
+function VersionHistoryModal({
+  versions,
+  onClose,
+  onRestore,
+}: {
+  versions: PageVersion[];
+  onClose: () => void;
+  onRestore: (v: PageVersion) => void;
+}) {
+  return (
+    <div className="vhist-overlay" onClick={onClose}>
+      <div className="vhist-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="vhist-header">
+          <span className="vhist-title-bar">
+            <History size={14} />
+            Histórico de versões
+          </span>
+          <button className="vhist-close" onClick={onClose}>
+            <XIcon size={14} />
+          </button>
+        </div>
+        <div className="vhist-list">
+          {versions.length === 0 ? (
+            <p className="vhist-empty">Nenhuma versão salva ainda.<br />O histórico é criado automaticamente enquanto você edita.</p>
+          ) : (
+            versions.map((v) => (
+              <div key={v.id} className="vhist-item">
+                <div className="vhist-item-info">
+                  <span className="vhist-time">{formatVersionDate(v.saved_at)}</span>
+                  <span className="vhist-page-title">{v.title || "Sem título"}</span>
+                </div>
+                <button
+                  className="vhist-restore-btn"
+                  onClick={() => onRestore(v)}
+                  title="Restaurar esta versão"
+                >
+                  <RotateCcw size={12} />
+                  Restaurar
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
 // ── Tag Editor ────────────────────────────────────────────────────────────────
 
-function TagEditor({ pageId }: { pageId: string }) {
+function TagEditor({ pageId, wordCount }: { pageId: string; wordCount: number }) {
   const { pages, updatePage } = usePagesStore();
   const page = pages.find((p) => p.id === pageId);
   const tags = page?.tags ?? [];
@@ -353,6 +687,8 @@ function TagEditor({ pageId }: { pageId: string }) {
       remove(tags[tags.length - 1]);
     }
   }
+
+  const readingTime = Math.max(1, Math.ceil(wordCount / 200));
 
   return (
     <div
@@ -387,6 +723,11 @@ function TagEditor({ pageId }: { pageId: string }) {
         onBlur={commit}
         placeholder={tags.length === 0 ? "Adicionar tag..." : ""}
       />
+      {wordCount > 0 && (
+        <span className="tag-editor-stats">
+          {wordCount} {wordCount === 1 ? "palavra" : "palavras"} · {readingTime} min
+        </span>
+      )}
     </div>
   );
 }

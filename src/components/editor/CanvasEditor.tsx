@@ -1,5 +1,6 @@
 import { Suspense, lazy, useEffect, useRef } from "react";
 import "@excalidraw/excalidraw/index.css";
+import { Maximize2 } from "lucide-react";
 import { usePagesStore } from "../../store/pages.store";
 import { useUIStore } from "../../store/ui.store";
 
@@ -14,7 +15,7 @@ interface Props {
 
 export default function CanvasEditor({ pageId }: Props) {
   const { pages, updatePage } = usePagesStore();
-  const { theme } = useUIStore();
+  const { theme, focusMode, toggleFocusMode } = useUIStore();
   const page = pages.find((p) => p.id === pageId);
   const saveTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
@@ -65,6 +66,17 @@ export default function CanvasEditor({ pageId }: Props) {
           onChange={handleTitleChange}
           placeholder="Sem título"
         />
+        {!focusMode && (
+          <div className="topbar-actions">
+            <button
+              className="topbar-action-btn"
+              onClick={toggleFocusMode}
+              title="Modo foco (⌘⇧F)"
+            >
+              <Maximize2 size={15} />
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="canvas-area">

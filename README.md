@@ -91,3 +91,51 @@ O banco SQLite é salvo automaticamente em:
 | macOS | `~/Library/Application Support/com.documentaai.app/documentaai.db` |
 | Linux | `~/.local/share/com.documentaai.app/documentaai.db` |
 | Windows | `%APPDATA%\com.documentaai.app\documentaai.db` |
+
+## Integração MCP (Claude Code, Kiro, Cursor…)
+
+O DocumentaAI inclui um servidor MCP que permite que ferramentas de IA leiam e escrevam páginas diretamente — sem precisar que o app esteja aberto.
+
+### Setup (só uma vez)
+
+```bash
+cd mcp-server
+npm install
+npm run build
+```
+
+### Configuração no Claude Code
+
+Adicione em `~/.claude.json`:
+
+```json
+{
+  "mcpServers": {
+    "documentaai": {
+      "command": "node",
+      "args": ["/caminho/absoluto/para/documentaai/mcp-server/dist/index.js"]
+    }
+  }
+}
+```
+
+Reinicie o Claude Code. As ferramentas estarão disponíveis automaticamente.
+
+### Ferramentas disponíveis
+
+| Ferramenta | O que faz |
+|---|---|
+| `list_pages` | Lista todas as páginas com título, emoji e hierarquia |
+| `get_page` | Retorna conteúdo completo de uma página (texto + BlockNote JSON) |
+| `search_pages` | Busca páginas por título |
+| `create_page` | Cria uma nova página (aceita texto simples ou BlockNote JSON) |
+| `update_page` | Atualiza título, conteúdo ou emoji de uma página existente |
+| `delete_page` | Remove uma página e todas as suas subpáginas |
+
+### Configuração via variável de ambiente
+
+Se o banco estiver em um caminho diferente do padrão:
+
+```bash
+DOCUMENTAAI_DB_PATH=/seu/caminho/documentaai.db node mcp-server/dist/index.js
+```

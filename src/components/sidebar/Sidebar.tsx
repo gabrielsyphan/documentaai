@@ -1,4 +1,4 @@
-import { Plus, Sun, Moon, Search, Star, FileText, RefreshCw, CalendarDays, LayoutTemplate, PenTool, ChevronDown, X as XIcon } from "lucide-react";
+import { Plus, Sun, Moon, Search, Star, FileText, RefreshCw, CalendarDays, LayoutTemplate, PenTool, Folder, FolderOpen, ChevronDown, X as XIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { usePagesStore } from "../../store/pages.store";
 import { useUIStore } from "../../store/ui.store";
@@ -79,6 +79,9 @@ export default function Sidebar({ onSearch, onTemplates }: Props) {
               <button className="new-page-menu-item" onMouseDown={() => { setShowNewMenu(false); createPage(undefined, { title: "Sem título", type: "canvas" }); }}>
                 <PenTool size={13} /> Canvas
               </button>
+              <button className="new-page-menu-item" onMouseDown={() => { setShowNewMenu(false); createPage(undefined, { title: "Nova pasta", type: "folder" }); }}>
+                <Folder size={13} /> Pasta
+              </button>
             </div>
           )}
         </div>
@@ -95,7 +98,11 @@ export default function Sidebar({ onSearch, onTemplates }: Props) {
                 onClick={() => selectPage(page.id)}
               >
                 <span className="favorite-item-icon">
-                  {page.emoji ?? <FileText size={13} />}
+                  {page.emoji ?? (
+                    page.type === "canvas" ? <PenTool size={13} /> :
+                    page.type === "folder" ? <FolderOpen size={13} /> :
+                    <FileText size={13} />
+                  )}
                 </span>
                 <span className="favorite-item-title">{page.title || "Sem título"}</span>
                 <Star size={11} className="favorite-star" fill="currentColor" />
@@ -185,6 +192,9 @@ export default function Sidebar({ onSearch, onTemplates }: Props) {
       </nav>
 
       <div className="sidebar-footer">
+        <span className="sidebar-shortcut-hint">
+          {/Mac/.test(navigator.platform) ? "⌘⇧Space" : "Ctrl+Shift+Space"} captura rápida
+        </span>
         <button
           className="theme-toggle"
           onClick={() => load()}

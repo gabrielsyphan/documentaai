@@ -77,7 +77,7 @@ jobs:
       - name: Generate and deploy latest.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VPS_PASS: ${{ secrets.VPS_PASS }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
         run: |
           TAG=${GITHUB_REF_NAME}
           VERSION=${TAG#v}
@@ -97,27 +97,44 @@ jobs:
           echo "Assets found:"
           echo "$ASSETS"
 
+          # Busca pelo nome real do asset usando padrão — Tauri pode incluir ou não a versão no nome
+          MACOS_TAR=$(echo "$ASSETS" | grep -E "aarch64\.app\.tar\.gz$" | grep -v "\.sig$" | head -1)
+          WIN_ZIP=$(echo "$ASSETS"   | grep -E "x64-setup\.nsis\.zip$"   | grep -v "\.sig$" | head -1)
+          LINUX_AI=$(echo "$ASSETS"  | grep -E "amd64\.AppImage\.tar\.gz$" | grep -v "\.sig$" | head -1)
+
+          echo "Bundles identificados:"
+          echo "  macOS:   ${MACOS_TAR:-NÃO ENCONTRADO}"
+          echo "  Windows: ${WIN_ZIP:-NÃO ENCONTRADO}"
+          echo "  Linux:   ${LINUX_AI:-NÃO ENCONTRADO}"
+
           get_sig() {
             local name="$1"
+            if [ -z "$name" ]; then echo ""; return; fi
             local sig_name="${name}.sig"
-            if echo "$ASSETS" | grep -q "^${sig_name}$"; then
-              curl -sL -H "Authorization: Bearer $GITHUB_TOKEN" \
-                "${BASE_URL}/${sig_name}"
+            if echo "$ASSETS" | grep -qF "$sig_name"; then
+              curl -sL -H "Authorization: Bearer $GITHUB_TOKEN" "${BASE_URL}/${sig_name}"
+            else
+              echo ""
             fi
           }
 
-          SIG_MACOS_ARM=$(get_sig "DocumentaAI_${VERSION}_aarch64.app.tar.gz")
-          SIG_WIN=$(get_sig "DocumentaAI_${VERSION}_x64-setup.nsis.zip")
-          SIG_LINUX=$(get_sig "DocumentaAI_${VERSION}_amd64.AppImage.tar.gz")
+          SIG_MACOS=$(get_sig "$MACOS_TAR")
+          SIG_WIN=$(get_sig "$WIN_ZIP")
+          SIG_LINUX=$(get_sig "$LINUX_AI")
+
+          echo "Assinaturas encontradas:"
+          echo "  macOS:   ${SIG_MACOS:+SIM}"
+          echo "  Windows: ${SIG_WIN:+SIM}"
+          echo "  Linux:   ${SIG_LINUX:+SIM}"
 
           PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
           python3 - <<PYEOF
-          import json
+          import json, sys
           version = "${VERSION}"
           tag = "${TAG}"
           pub_date = "${PUB_DATE}"
-          base = "https://github.com/gabrielsyphan/documentaai/releases/download/${TAG}"
+          base = "${BASE_URL}"
 
           data = {
             "version": version,
@@ -127,14 +144,22 @@ jobs:
           }
 
           sigs = {
-            "darwin-aarch64": ("${SIG_MACOS_ARM}", f"{base}/DocumentaAI_{version}_aarch64.app.tar.gz"),
-            "windows-x86_64": ("${SIG_WIN}",         f"{base}/DocumentaAI_{version}_x64-setup.nsis.zip"),
-            "linux-x86_64":   ("${SIG_LINUX}",       f"{base}/DocumentaAI_{version}_amd64.AppImage.tar.gz"),
+            "darwin-aarch64": ("${SIG_MACOS}", "${MACOS_TAR}"),
+            "windows-x86_64": ("${SIG_WIN}",   "${WIN_ZIP}"),
+            "linux-x86_64":   ("${SIG_LINUX}", "${LINUX_AI}"),
           }
 
-          for platform, (sig, url) in sigs.items():
-            if sig.strip():
-              data["platforms"][platform] = {"signature": sig.strip(), "url": url}
+          for platform, (sig, asset) in sigs.items():
+            if sig.strip() and asset.strip():
+              data["platforms"][platform] = {
+                "signature": sig.strip(),
+                "url": f"{base}/{asset}"
+              }
+
+          if not data["platforms"]:
+            print("ERRO: nenhuma plataforma com assinatura encontrada.", file=sys.stderr)
+            print("Verifique se TAURI_SIGNING_PRIVATE_KEY e TAURI_SIGNING_PRIVATE_KEY_PASSWORD estão configurados nos secrets do repositório.", file=sys.stderr)
+            sys.exit(1)
 
           print(json.dumps(data, indent=2))
           with open("latest.json", "w") as f:
@@ -144,17 +169,21 @@ jobs:
           echo "Generated latest.json:"
           cat latest.json
 
-          echo "Uploading to VPS..."
-          sshpass -p "$VPS_PASS" ssh \
+          echo "Deploying to VPS via SSH key..."
+          install -m 600 /dev/null /tmp/vps_key
+          echo "$VPS_SSH_KEY" > /tmp/vps_key
+
+          ssh -i /tmp/vps_key \
             -o StrictHostKeyChecking=no \
             -o ConnectTimeout=30 \
             root@2.25.203.118 \
             "mkdir -p /var/www/documentai/updates"
 
-          sshpass -p "$VPS_PASS" scp \
+          scp -i /tmp/vps_key \
             -o StrictHostKeyChecking=no \
             -o ConnectTimeout=30 \
             latest.json \
             root@2.25.203.118:/var/www/documentai/updates/latest.json
 
+          rm -f /tmp/vps_key
           echo "Done — latest.json deployed."

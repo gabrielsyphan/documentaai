@@ -4,7 +4,7 @@ import { usePagesStore } from "../../store/pages.store";
 interface DragCtx {
   draggedId: string | null;
   overId: string | null;
-  overPosition: "before" | "after";
+  overPosition: "before" | "after" | "inside";
   startDrag: (id: string) => void;
 }
 
@@ -14,13 +14,12 @@ export const useDragCtx = () => useContext(DragContext);
 export function DragProvider({ children }: { children: React.ReactNode }) {
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
-  const [overPosition, setOverPosition] = useState<"before" | "after">("before");
+  const [overPosition, setOverPosition] = useState<"before" | "after" | "inside">("before");
   const { movePage } = usePagesStore();
 
-  // Refs para ter valores atuais dentro dos listeners
   const draggedRef = useRef<string | null>(null);
   const overIdRef = useRef<string | null>(null);
-  const overPosRef = useRef<"before" | "after">("before");
+  const overPosRef = useRef<"before" | "after" | "inside">("before");
 
   function startDrag(id: string) {
     draggedRef.current = id;
@@ -42,7 +41,15 @@ export function DragProvider({ children }: { children: React.ReactNode }) {
       if (row && row.dataset.pageId !== draggedRef.current) {
         const id = row.dataset.pageId!;
         const rect = row.getBoundingClientRect();
-        const pos: "before" | "after" = e.clientY < rect.top + rect.height / 2 ? "before" : "after";
+        const relY = e.clientY - rect.top;
+        const ratio = relY / rect.height;
+
+        // Top 25% → before, bottom 25% → after, middle 50% → inside
+        let pos: "before" | "after" | "inside";
+        if (ratio < 0.25) pos = "before";
+        else if (ratio > 0.75) pos = "after";
+        else pos = "inside";
+
         overIdRef.current = id;
         overPosRef.current = pos;
         setOverId(id);

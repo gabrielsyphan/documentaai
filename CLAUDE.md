@@ -199,38 +199,52 @@ cd mcp-server && npm install && npm run build
 
 ### Fase 5 — Qualidade de escrita
 
-#### Leitura em voz alta (Text-to-Speech)
-- [ ] Botão "Ler em voz alta" no header da página
-- [ ] Usa **Web Speech API** (`window.speechSynthesis`) — gratuito, offline, sem dependências,
-      nativo no WebKit/Tauri; no macOS usa as vozes da Apple (ex: Luciana em PT-BR)
-- [ ] Extrai texto puro do BlockNote JSON (ignora URLs de imagem, blocos de código, etc.)
-- [ ] Controles: play/pause/stop e velocidade de leitura
-- [ ] Destaque visual do parágrafo sendo lido (via eventos `onboundary` da API)
-- [ ] Seleção de voz disponível no sistema (a API lista todas as vozes instaladas)
+#### Leitura em voz alta (Text-to-Speech) ✅ concluída
+- [x] Botão `Volume2` no header da página (aparece ao passar o mouse)
+- [x] Usa **Web Speech API** (`window.speechSynthesis`) — gratuito, offline, sem dependências,
+      nativo no WebKit/Tauri; no macOS usa as vozes da Apple (seleciona PT-BR automaticamente)
+- [x] Extrai texto puro do BlockNote JSON via `src/lib/tts.ts` (ignora código, imagens, mídia)
+- [x] Controles em barra fixa no topo do editor: play/pause, stop, velocidade (0.75×–2×)
+- [x] Seleção de voz disponível no sistema via `<select>`
+- [x] Leitura parágrafo a parágrafo com progresso exibido (ex: 3/12)
 
-#### Focus mode
-- [ ] Tela cheia sem sidebar, tipografia maior, zero distrações
-- [ ] Toggle via atalho (ex: `⌘⇧F`)
+#### Focus mode ✅ concluído
+- [x] Sidebar oculta, tipografia maior (17px), line-height mais espaçado
+- [x] Toggle via `⌘⇧F` ou botão `Maximize2` no header da página
+- [x] Sair com `Escape` ou botão `Minimize2` flutuante (aparece ao hover)
 
-#### Estatísticas
-- [ ] Contador de palavras e tempo de leitura estimado no rodapé do editor
+#### Estatísticas ✅ concluída
+- [x] Contador de palavras e tempo de leitura estimado na barra de tags (rodapé do editor)
+- [x] Atualiza em tempo real a cada tecla digitada
 
-#### Histórico de versões
-- [ ] Salvar snapshots do conteúdo a cada edição significativa
-- [ ] Nova tabela `page_versions` no SQLite (id, page_id, content, saved_at)
-- [ ] UI para visualizar e restaurar versões anteriores
+#### Histórico de versões ✅ concluído
+- [x] Tabela `page_versions` no SQLite (id, page_id, title, content, saved_at)
+- [x] Snapshot salvo automaticamente com debounce de 15s + ao navegar para outra página
+- [x] Máximo de 30 versões por página (antigas descartadas automaticamente)
+- [x] Botão `History` no topbar abre modal com lista de versões e timestamps relativos
+- [x] Botão "Restaurar" substitui o conteúdo atual via `editor.replaceBlocks`
 
-#### Backlinks
-- [ ] Rodapé da página mostra quais outras páginas referenciam a atual
-- [ ] Detectar `[[nome da página]]` no conteúdo JSON como links internos
-- [ ] Base para o Graph view futuro
+#### Backlinks ✅ concluído
+- [x] Rodapé da página mostra quais outras páginas referenciam a atual via `[[título]]`
+- [x] Detecta `[[nome da página]]` no JSON armazenado com regex case-insensitive
+- [x] Clique no backlink navega para a página de origem
+- [x] Base para o Graph view futuro
+- [x] **UX de criação:** digitar `[[` no editor abre menu de sugestão com lista de páginas;
+      selecionar insere um chip visual inline tipo `wikilink` (custom inline content do BlockNote)
+- [x] **Visual no editor:** chip roxo com ícone de link; clicar no chip navega para a página
+- [x] **Detecção dupla:** compatível com `[[título]]` texto antigo + novo tipo `wikilink` inline
+- [x] **Empty state educativo:** seção de backlinks sempre visível com dica `[[` quando vazia
+- [x] Ícone `?` no header da seção mostra tooltip explicando a sintaxe
 
 ### Fase 6 — Captura e aprendizado
 
-#### Quick capture global
-- [ ] Atalho de sistema que abre uma mini-janela mesmo com o app fechado
-- [ ] Implementado com `tauri-plugin-global-shortcut` + janela secundária do Tauri
-- [ ] Conteúdo capturado vai para inbox ou Daily Note do dia
+#### Quick capture global ✅ concluído
+- [x] Atalho global `⌘⇧Space` (macOS) / `Ctrl+Shift+Space` (Win/Linux) abre/fecha a janela
+- [x] Implementado com `tauri-plugin-global-shortcut` + janela secundária sem decorações
+- [x] Conteúdo salvo na Daily Note do dia (cria a nota se ainda não existir)
+- [x] Janela se reseta e foca automaticamente ao reabrir
+- [x] Drag region no header para mover a janela, `⌘↵` para salvar, `Esc` para fechar
+- [x] Vite multi-page: `quick-capture.html` como segundo entry point
 
 #### Integração com Ollama (IA local, sem internet)
 - [ ] Resumir página atual

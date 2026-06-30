@@ -1,4 +1,4 @@
-export type PageType = "document" | "daily" | "canvas";
+export type PageType = "document" | "daily" | "canvas" | "folder";
 
 export interface Page {
   id: string;
@@ -16,4 +16,12 @@ export interface Page {
 
 export interface PageWithChildren extends Page {
   children: PageWithChildren[];
+}
+
+export interface PageVersion {
+  id: string;
+  page_id: string;
+  title: string;
+  content: string | null;
+  saved_at: string;
 }

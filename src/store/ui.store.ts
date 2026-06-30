@@ -6,15 +6,18 @@ interface UIState {
   theme: Theme;
   sidebarOpen: boolean;
   activeTag: string | null;
+  focusMode: boolean;
   toggleTheme: () => void;
   toggleSidebar: () => void;
   setActiveTag: (tag: string | null) => void;
+  toggleFocusMode: () => void;
 }
 
 export const useUIStore = create<UIState>((set) => ({
   theme: "dark",
   sidebarOpen: true,
   activeTag: null,
+  focusMode: false,
   toggleTheme: () =>
     set((s) => {
       const next = s.theme === "dark" ? "light" : "dark";
@@ -23,4 +26,5 @@ export const useUIStore = create<UIState>((set) => ({
     }),
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
   setActiveTag: (tag) => set({ activeTag: tag }),
+  toggleFocusMode: () => set((s) => ({ focusMode: !s.focusMode })),
 }));

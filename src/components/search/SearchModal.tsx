@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Search, FileText } from "lucide-react";
+import { Search, FileText, PenTool, Folder, CalendarDays } from "lucide-react";
 import { usePagesStore } from "../../store/pages.store";
 
 interface Props {
@@ -72,7 +72,12 @@ export default function SearchModal({ open, onClose }: Props) {
                 className="search-result-item"
                 onClick={() => handleSelect(page.id)}
               >
-                <FileText size={14} />
+                {page.type === "daily" ? <CalendarDays size={14} />
+                  : page.emoji ? <span style={{ fontSize: 14, lineHeight: 1 }}>{page.emoji}</span>
+                  : page.type === "canvas" ? <PenTool size={14} />
+                  : page.type === "folder" ? <Folder size={14} />
+                  : <FileText size={14} />
+                }
                 <span>{page.title || "Sem título"}</span>
               </button>
             ))

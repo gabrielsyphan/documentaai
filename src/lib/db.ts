@@ -1,5 +1,5 @@
 import Database from "@tauri-apps/plugin-sql";
-import type { Page } from "../types";
+import type { Page, PageVersion } from "../types";
 
 let db: Database | null = null;
 
@@ -28,6 +28,15 @@ async function getDb(): Promise<Database> {
     ]) {
       try { await db.execute(migration); } catch { /* coluna já existe */ }
     }
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS page_versions (
+        id       TEXT PRIMARY KEY,
+        page_id  TEXT NOT NULL,
+        title    TEXT NOT NULL DEFAULT '',
+        content  TEXT,
+        saved_at TEXT NOT NULL
+      )
+    `);
   }
   return db;
 }
@@ -77,4 +86,36 @@ export async function upsertPage(page: Page): Promise<void> {
 export async function removePage(id: string): Promise<void> {
   const database = await getDb();
   await database.execute("DELETE FROM pages WHERE id = $1", [id]);
+}
+
+export async function saveVersion(
+  pageId: string,
+  title: string,
+  content: string | null
+): Promise<void> {
+  const database = await getDb();
+  await database.execute(
+    `INSERT INTO page_versions (id, page_id, title, content, saved_at) VALUES ($1, $2, $3, $4, $5)`,
+    [crypto.randomUUID(), pageId, title, content, new Date().toISOString()]
+  );
+  // Mantém no máximo 30 versões por página
+  await database.execute(
+    `DELETE FROM page_versions WHERE page_id = $1 AND id NOT IN (
+       SELECT id FROM page_versions WHERE page_id = $1 ORDER BY saved_at DESC LIMIT 30
+     )`,
+    [pageId, pageId]
+  );
+}
+
+export async function getVersions(pageId: string): Promise<PageVersion[]> {
+  const database = await getDb();
+  return database.select<PageVersion[]>(
+    `SELECT * FROM page_versions WHERE page_id = $1 ORDER BY saved_at DESC`,
+    [pageId]
+  );
+}
+
+export async function deletePageVersions(pageId: string): Promise<void> {
+  const database = await getDb();
+  await database.execute("DELETE FROM page_versions WHERE page_id = $1", [pageId]);
 }

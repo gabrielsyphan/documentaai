@@ -24,21 +24,27 @@ interface PagesState {
   pages: Page[];
   tree: PageWithChildren[];
   selectedPageId: string | null;
+  navHistory: string[];
+  navIndex: number;
   loading: boolean;
   load: () => Promise<void>;
   createPage: (parentId?: string, overrides?: { title?: string; emoji?: string; content?: string; type?: Page["type"] }) => Promise<Page>;
   createDailyNote: () => Promise<Page>;
   updatePage: (id: string, updates: Partial<Page>) => Promise<void>;
   deletePage: (id: string) => Promise<void>;
-  movePage: (draggedId: string, targetId: string, position: "before" | "after") => Promise<void>;
+  movePage: (draggedId: string, targetId: string, position: "before" | "after" | "inside") => Promise<void>;
   toggleFavorite: (id: string) => Promise<void>;
   selectPage: (id: string | null) => void;
+  navBack: () => void;
+  navForward: () => void;
 }
 
 export const usePagesStore = create<PagesState>((set, get) => ({
   pages: [],
   tree: [],
   selectedPageId: null,
+  navHistory: [],
+  navIndex: -1,
   loading: false,
 
   load: async () => {
@@ -121,22 +127,35 @@ export const usePagesStore = create<PagesState>((set, get) => ({
     const dragged = pages.find((p) => p.id === draggedId)!;
     const target = pages.find((p) => p.id === targetId)!;
 
-    const siblings = pages
-      .filter((p) => p.parent_id === target.parent_id && p.id !== draggedId)
-      .sort((a, b) => a.order_index - b.order_index);
+    let updated: Page;
 
-    const targetIdx = siblings.findIndex((p) => p.id === targetId);
-
-    let newIndex: number;
-    if (position === "before") {
-      const prev = siblings[targetIdx - 1];
-      newIndex = prev ? (prev.order_index + target.order_index) / 2 : target.order_index - 1;
+    if (position === "inside") {
+      // Make dragged a child of target, placed at the end
+      const targetChildren = pages
+        .filter((p) => p.parent_id === targetId && p.id !== draggedId)
+        .sort((a, b) => a.order_index - b.order_index);
+      const last = targetChildren[targetChildren.length - 1];
+      const newIndex = last ? last.order_index + 1 : 0;
+      updated = { ...dragged, parent_id: targetId, order_index: newIndex };
     } else {
-      const next = siblings[targetIdx + 1];
-      newIndex = next ? (target.order_index + next.order_index) / 2 : target.order_index + 1;
+      const siblings = pages
+        .filter((p) => p.parent_id === target.parent_id && p.id !== draggedId)
+        .sort((a, b) => a.order_index - b.order_index);
+
+      const targetIdx = siblings.findIndex((p) => p.id === targetId);
+
+      let newIndex: number;
+      if (position === "before") {
+        const prev = siblings[targetIdx - 1];
+        newIndex = prev ? (prev.order_index + target.order_index) / 2 : target.order_index - 1;
+      } else {
+        const next = siblings[targetIdx + 1];
+        newIndex = next ? (target.order_index + next.order_index) / 2 : target.order_index + 1;
+      }
+
+      updated = { ...dragged, parent_id: target.parent_id, order_index: newIndex };
     }
 
-    const updated = { ...dragged, parent_id: target.parent_id, order_index: newIndex };
     await upsertPage(updated);
     const newPages = pages.map((p) => (p.id === draggedId ? updated : p));
     set({ pages: newPages, tree: buildTree(newPages.filter((p) => p.type !== "daily")) });
@@ -151,5 +170,27 @@ export const usePagesStore = create<PagesState>((set, get) => ({
     set({ pages: newPages, tree: buildTree(newPages.filter((p) => p.type !== "daily")) });
   },
 
-  selectPage: (id) => set({ selectedPageId: id }),
+  selectPage: (id) => {
+    if (!id) { set({ selectedPageId: null }); return; }
+    const { selectedPageId, navHistory, navIndex } = get();
+    if (id === selectedPageId) return;
+    // Descarta o "futuro" e empurra o novo destino
+    const trimmed = navHistory.slice(0, navIndex + 1);
+    const newHistory = [...trimmed, id];
+    set({ selectedPageId: id, navHistory: newHistory, navIndex: newHistory.length - 1 });
+  },
+
+  navBack: () => {
+    const { navHistory, navIndex } = get();
+    if (navIndex <= 0) return;
+    const newIndex = navIndex - 1;
+    set({ selectedPageId: navHistory[newIndex], navIndex: newIndex });
+  },
+
+  navForward: () => {
+    const { navHistory, navIndex } = get();
+    if (navIndex >= navHistory.length - 1) return;
+    const newIndex = navIndex + 1;
+    set({ selectedPageId: navHistory[newIndex], navIndex: newIndex });
+  },
 }));
