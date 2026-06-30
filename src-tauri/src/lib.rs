@@ -77,11 +77,14 @@ pub fn run() {
         .plugin(tauri_plugin_sql::Builder::default().build())
         .plugin(tauri_plugin_updater::Builder::default().build())
         .plugin(tauri_plugin_process::init())
-        // Autostart: when enabled, launches with --hidden so the main window stays closed
-        .plugin(tauri_plugin_autostart::init(
-            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            Some(vec!["--hidden"]),
-        ))
+        // Autostart: when enabled, launches with --hidden so the main window stays closed.
+        // macOS uses LaunchAgent; Windows/Linux have a different init() signature.
+        .plugin({
+            #[cfg(target_os = "macos")]
+            { tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--hidden"])) }
+            #[cfg(not(target_os = "macos"))]
+            { tauri_plugin_autostart::init(Some(vec!["--hidden"])) }
+        })
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, event| {
