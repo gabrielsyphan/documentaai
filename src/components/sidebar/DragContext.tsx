@@ -1,0 +1,84 @@
+import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { usePagesStore } from "../../store/pages.store";
+
+interface DragCtx {
+  draggedId: string | null;
+  overId: string | null;
+  overPosition: "before" | "after";
+  startDrag: (id: string) => void;
+}
+
+const DragContext = createContext<DragCtx>(null!);
+export const useDragCtx = () => useContext(DragContext);
+
+export function DragProvider({ children }: { children: React.ReactNode }) {
+  const [draggedId, setDraggedId] = useState<string | null>(null);
+  const [overId, setOverId] = useState<string | null>(null);
+  const [overPosition, setOverPosition] = useState<"before" | "after">("before");
+  const { movePage } = usePagesStore();
+
+  // Refs para ter valores atuais dentro dos listeners
+  const draggedRef = useRef<string | null>(null);
+  const overIdRef = useRef<string | null>(null);
+  const overPosRef = useRef<"before" | "after">("before");
+
+  function startDrag(id: string) {
+    draggedRef.current = id;
+    overIdRef.current = null;
+    setDraggedId(id);
+    setOverId(null);
+    document.documentElement.style.cursor = "grabbing";
+    window.getSelection()?.removeAllRanges();
+  }
+
+  useEffect(() => {
+    if (!draggedId) return;
+
+    function onMove(e: PointerEvent) {
+      e.preventDefault();
+      const el = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
+      const row = el?.closest<HTMLElement>("[data-page-id]");
+
+      if (row && row.dataset.pageId !== draggedRef.current) {
+        const id = row.dataset.pageId!;
+        const rect = row.getBoundingClientRect();
+        const pos: "before" | "after" = e.clientY < rect.top + rect.height / 2 ? "before" : "after";
+        overIdRef.current = id;
+        overPosRef.current = pos;
+        setOverId(id);
+        setOverPosition(pos);
+      } else if (!row) {
+        overIdRef.current = null;
+        setOverId(null);
+      }
+    }
+
+    function onUp() {
+      const did = draggedRef.current;
+      const oid = overIdRef.current;
+      const pos = overPosRef.current;
+      if (did && oid && did !== oid) {
+        movePage(did, oid, pos);
+      }
+      draggedRef.current = null;
+      overIdRef.current = null;
+      setDraggedId(null);
+      setOverId(null);
+      document.documentElement.style.cursor = "";
+    }
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      document.documentElement.style.cursor = "";
+    };
+  }, [draggedId, movePage]);
+
+  return (
+    <DragContext.Provider value={{ draggedId, overId, overPosition, startDrag }}>
+      {children}
+    </DragContext.Provider>
+  );
+}
