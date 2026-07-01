@@ -369,13 +369,15 @@ export default function Editor({ pageId }: Props) {
             autoFocus={!page?.title}
           />
           <div className="topbar-actions" onMouseDown={(e) => e.stopPropagation()}>
-            <button
-              className={`topbar-action-btn${tts.speaking ? " active" : ""}`}
-              onClick={tts.speaking ? tts.stop : () => tts.play(editor.document as object[])}
-              title={tts.speaking ? "Parar leitura" : "Ler em voz alta"}
-            >
-              <Volume2 size={15} />
-            </button>
+            {tts.supported && (
+              <button
+                className={`topbar-action-btn${tts.speaking ? " active" : ""}`}
+                onClick={tts.speaking ? tts.stop : () => tts.play(editor.document as object[])}
+                title={tts.speaking ? "Parar leitura" : "Ler em voz alta"}
+              >
+                <Volume2 size={15} />
+              </button>
+            )}
             <button
               className="topbar-action-btn"
               onClick={handleOpenHistory}

@@ -33,7 +33,11 @@ export function countWords(blocks: object[]): number {
 
 // ── useTTS ────────────────────────────────────────────────────────────────────
 
+// Web Speech API is not available in WebKitGTK on Linux
+const TTS_SUPPORTED = typeof window !== "undefined" && "speechSynthesis" in window;
+
 export interface TTSState {
+  supported: boolean;
   speaking: boolean;
   paused: boolean;
   currentIdx: number;
@@ -58,7 +62,6 @@ export function useTTS(): TTSState {
   const [voiceURI, setVoiceURIState] = useState("");
   const [rate, setRate] = useState(1);
 
-  // Refs para acessar valores atuais dentro de callbacks assíncronos
   const ref = useRef({ voiceURI: "", rate: 1, voices: [] as SpeechSynthesisVoice[], chunks: [] as string[], idx: 0 });
 
   useEffect(() => { ref.current.voiceURI = voiceURI; }, [voiceURI]);
@@ -66,6 +69,7 @@ export function useTTS(): TTSState {
   useEffect(() => { ref.current.voices = voices; }, [voices]);
 
   useEffect(() => {
+    if (!TTS_SUPPORTED) return;
     const synth = window.speechSynthesis;
     function loadVoices() {
       const v = synth.getVoices();
@@ -83,30 +87,24 @@ export function useTTS(): TTSState {
   }, []);
 
   const speakFrom = useCallback((idx: number) => {
+    if (!TTS_SUPPORTED) return;
     const synth = window.speechSynthesis;
     const { chunks, voiceURI, rate, voices } = ref.current;
-
-    if (idx >= chunks.length) {
-      setSpeaking(false);
-      setPaused(false);
-      return;
-    }
-
+    if (idx >= chunks.length) { setSpeaking(false); setPaused(false); return; }
     const utterance = new SpeechSynthesisUtterance(chunks[idx]);
     const voice = voices.find((v) => v.voiceURI === voiceURI);
     if (voice) utterance.voice = voice;
     utterance.rate = rate;
-
     utterance.onend = () => {
       ref.current.idx = idx + 1;
       setCurrentIdx(idx + 1);
       speakFrom(idx + 1);
     };
-
     synth.speak(utterance);
   }, []);
 
   function play(blocks: object[]) {
+    if (!TTS_SUPPORTED) return;
     window.speechSynthesis.cancel();
     const chunks = extractParagraphs(blocks as Block[]);
     if (!chunks.length) return;
@@ -120,16 +118,19 @@ export function useTTS(): TTSState {
   }
 
   function pause() {
+    if (!TTS_SUPPORTED) return;
     window.speechSynthesis.pause();
     setPaused(true);
   }
 
   function resume() {
+    if (!TTS_SUPPORTED) return;
     window.speechSynthesis.resume();
     setPaused(false);
   }
 
   function stop() {
+    if (!TTS_SUPPORTED) return;
     window.speechSynthesis.cancel();
     setSpeaking(false);
     setPaused(false);
@@ -145,12 +146,11 @@ export function useTTS(): TTSState {
   function changeRate(r: number) {
     setRate(r);
     ref.current.rate = r;
-    // Se estiver lendo, reinicia o chunk atual com a nova velocidade
-    if (speaking && !paused) {
+    if (TTS_SUPPORTED && speaking && !paused) {
       window.speechSynthesis.cancel();
       speakFrom(ref.current.idx);
     }
   }
 
-  return { speaking, paused, currentIdx, totalChunks, voices, voiceURI, rate, setVoiceURI, changeRate, play, pause, resume, stop };
+  return { supported: TTS_SUPPORTED, speaking, paused, currentIdx, totalChunks, voices, voiceURI, rate, setVoiceURI, changeRate, play, pause, resume, stop };
 }
