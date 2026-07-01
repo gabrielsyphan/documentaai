@@ -88,9 +88,6 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      # tauri-action com releaseId: faz o build, assina e sobe TODOS os artefatos
-      # (instaladores versionados + bundles de update + .sig). Só ele conhece a lógica
-      # de signing; sem releaseId, os bundles de update e .sig não são gerados.
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
@@ -101,7 +98,6 @@ jobs:
           releaseId: ${{ needs.create-release.outputs.release_id }}
           args: --target ${{ matrix.target }}
 
-      # Sobe uma cópia com nome fixo (sem versão) para facilitar download manual
       - name: Upload simple-named installer
         shell: bash
         env:
@@ -124,19 +120,17 @@ jobs:
           REPO="${{ github.repository }}"
           BASE="https://github.com/${REPO}/releases/download/${TAG}"
 
-          # Descobre os nomes dos .sig que o tauri-action subiu (nomes versionados)
           SIG_MAC_NAME=$(gh release view "$TAG" --repo "$REPO" --json assets \
-            --jq '[.assets[].name | select(endswith(".app.tar.gz.sig"))] | first // ""')
+            --jq '[.assets[].name | select(endswith(".app.tar.gz.sig"))] | .[0] // ""')
           SIG_WIN_NAME=$(gh release view "$TAG" --repo "$REPO" --json assets \
-            --jq '[.assets[].name | select(endswith(".nsis.zip.sig"))] | first // ""')
+            --jq '[.assets[].name | select(endswith(".nsis.zip.sig"))] | .[0] // ""')
           SIG_LIN_NAME=$(gh release view "$TAG" --repo "$REPO" --json assets \
-            --jq '[.assets[].name | select(endswith(".AppImage.tar.gz.sig"))] | first // ""')
+            --jq '[.assets[].name | select(endswith(".AppImage.tar.gz.sig"))] | .[0] // ""')
 
           echo "Mac sig: $SIG_MAC_NAME"
           echo "Win sig: $SIG_WIN_NAME"
           echo "Lin sig: $SIG_LIN_NAME"
 
-          # Baixa o conteúdo dos .sig
           [ -n "$SIG_MAC_NAME" ] && \
             SIG_MAC=$(gh release download "$TAG" --repo "$REPO" -p "$SIG_MAC_NAME" --output -) || \
             SIG_MAC=""
@@ -147,50 +141,39 @@ jobs:
             SIG_LIN=$(gh release download "$TAG" --repo "$REPO" -p "$SIG_LIN_NAME" --output -) || \
             SIG_LIN=""
 
-          # Exporta para o Python ler via os.environ
-          export TAG="$TAG"
-          export SIG_MAC="$SIG_MAC"
-          export SIG_WIN="$SIG_WIN"
-          export SIG_LIN="$SIG_LIN"
-          export URL_MAC="${BASE}/${SIG_MAC_NAME%.sig}"
-          export URL_WIN="${BASE}/${SIG_WIN_NAME%.sig}"
-          export URL_LIN="${BASE}/${SIG_LIN_NAME%.sig}"
+          URL_MAC="${BASE}/${SIG_MAC_NAME%.sig}"
+          URL_WIN="${BASE}/${SIG_WIN_NAME%.sig}"
+          URL_LIN="${BASE}/${SIG_LIN_NAME%.sig}"
 
-          python3 - <<'PYEOF'
-import json, sys, os
-from datetime import datetime, timezone
+          jq -n \
+            --arg version "${TAG#v}" \
+            --arg notes "DocumentaAI $TAG" \
+            --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg sig_mac "$SIG_MAC" \
+            --arg url_mac "$URL_MAC" \
+            --arg sig_win "$SIG_WIN" \
+            --arg url_win "$URL_WIN" \
+            --arg sig_lin "$SIG_LIN" \
+            --arg url_lin "$URL_LIN" \
+            '{
+              version: $version,
+              notes: $notes,
+              pub_date: $pub_date,
+              platforms: (
+                {}
+                | if $sig_mac != "" and $url_mac != "" then . + {"darwin-aarch64": {signature: $sig_mac, url: $url_mac}} else . end
+                | if $sig_win != "" and $url_win != "" then . + {"windows-x86_64": {signature: $sig_win, url: $url_win}} else . end
+                | if $sig_lin != "" and $url_lin != "" then . + {"linux-x86_64": {signature: $sig_lin, url: $url_lin}} else . end
+              )
+            }' > latest.json
 
-tag     = os.environ['TAG']
-sig_mac = os.environ.get('SIG_MAC', '')
-sig_win = os.environ.get('SIG_WIN', '')
-sig_lin = os.environ.get('SIG_LIN', '')
-url_mac = os.environ.get('URL_MAC', '')
-url_win = os.environ.get('URL_WIN', '')
-url_lin = os.environ.get('URL_LIN', '')
+          cat latest.json
 
-data = {
-  "version": tag.lstrip('v'),
-  "notes": f"DocumentaAI {tag}",
-  "pub_date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-  "platforms": {},
-}
-
-for platform, sig, url in [
-  ("darwin-aarch64", sig_mac, url_mac),
-  ("windows-x86_64", sig_win, url_win),
-  ("linux-x86_64",   sig_lin, url_lin),
-]:
-  if sig.strip() and url.strip():
-    data["platforms"][platform] = {"signature": sig.strip(), "url": url}
-
-if not data["platforms"]:
-  print("ERROR: nenhuma plataforma com assinatura encontrada", file=sys.stderr)
-  sys.exit(1)
-
-print(json.dumps(data, indent=2))
-with open("latest.json", "w") as f:
-  json.dump(data, f, indent=2)
-PYEOF
+          PLATFORMS=$(jq '.platforms | length' latest.json)
+          if [ "$PLATFORMS" -eq 0 ]; then
+            echo "ERROR: nenhuma plataforma com assinatura encontrada"
+            exit 1
+          fi
 
           gh release upload "$TAG" latest.json --clobber
           echo "latest.json publicado no release $TAG"
