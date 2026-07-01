@@ -246,12 +246,6 @@ cd mcp-server && npm install && npm run build
 - [x] Drag region no header para mover a janela, `⌘↵` para salvar, `Esc` para fechar
 - [x] Vite multi-page: `quick-capture.html` como segundo entry point
 
-#### Integração com Ollama (IA local, sem internet)
-- [ ] Resumir página atual
-- [ ] Continuar/expandir texto selecionado
-- [ ] Responder perguntas sobre o conteúdo da página
-- [ ] Comunica com Ollama via HTTP local (`http://localhost:11434`)
-
 #### Flashcards / Repetição espaçada
 - [ ] Marcar trechos de uma página como cartão de estudo
 - [ ] Sistema de revisão com intervalos (algoritmo SM-2 ou similar)
@@ -262,7 +256,13 @@ cd mcp-server && npm install && npm run build
 - [ ] Renderizado com D3.js ou similar
 - [ ] Nós = páginas, arestas = referências entre elas
 
-### Fase 7 — Sync (futuro)
+### Fase 7 - Integração com Ollama (IA local, sem internet) ou com api externas providas pelo usuário
+- [ ] Resumir página atual
+- [ ] Continuar/expandir texto selecionado
+- [ ] Responder perguntas sobre o conteúdo da página
+- [ ] Comunica com Ollama via HTTP local (`http://localhost:11434`)
+
+### Fase 8 — Sync (futuro)
 - [ ] Backend (Fastify ou Hono + PostgreSQL)
 - [ ] Auth (Clerk ou similar)
 - [ ] Sync em tempo real
