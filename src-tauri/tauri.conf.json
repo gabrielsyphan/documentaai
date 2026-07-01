@@ -45,7 +45,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDM0ODA3QkJBN0RERjAyNDQKUldSRUF0OTl1bnVBTkJkdVRISjY0RExsSEMwc214MWhVQllhczREb2hJU2lBeDRLTlcxMGxWM0EK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDVDMTM0OTcxRUYxODg1MjIKUldRaWhSanZjVWtUWEh6bmpzbEdEaG1mMkVNYjE2dXYvb01WNmFrR3dKSTdqWlFROFFPWDg5ZnUK",
       "endpoints": ["https://github.com/gabrielsyphan/documentaai/releases/latest/download/latest.json"]
     }
   },
