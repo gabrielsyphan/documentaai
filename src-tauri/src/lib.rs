@@ -126,6 +126,9 @@ pub fn run() {
             let open_item = MenuItemBuilder::new("Abrir DocumentaAI")
                 .id("open")
                 .build(app)?;
+            let capture_item = MenuItemBuilder::new("Captura Rápida")
+                .id("quick-capture")
+                .build(app)?;
             let autostart_item = CheckMenuItemBuilder::new("Iniciar com o sistema")
                 .id("autostart")
                 .checked(autostart_on)
@@ -136,7 +139,7 @@ pub fn run() {
                 .build(app)?;
 
             let menu = MenuBuilder::new(app)
-                .items(&[&open_item, &autostart_item, &sep, &quit_item])
+                .items(&[&open_item, &capture_item, &autostart_item, &sep, &quit_item])
                 .build()?;
 
             TrayIconBuilder::new()
@@ -146,6 +149,14 @@ pub fn run() {
                 .on_menu_event(|app, event| match event.id().as_ref() {
                     "open" => {
                         if let Some(win) = app.get_webview_window("main") {
+                            let _ = win.show();
+                            let _ = win.set_focus();
+                        }
+                    }
+                    "quick-capture" => {
+                        if let Some(win) = app.get_webview_window("quick-capture") {
+                            #[cfg(target_os = "macos")]
+                            save_frontmost_pid();
                             let _ = win.show();
                             let _ = win.set_focus();
                         }
