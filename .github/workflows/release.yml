@@ -9,20 +9,48 @@ permissions:
   contents: write
 
 jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.create.outputs.result }}
+    steps:
+      - uses: actions/github-script@v7
+        id: create
+        with:
+          result-encoding: string
+          script: |
+            const tag = context.ref.replace('refs/tags/', '')
+            const { data } = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: tag,
+              name: `DocumentaAI ${tag}`,
+              body: [
+                '## Download',
+                '',
+                '| Plataforma | Arquivo |',
+                '|---|---|',
+                '| macOS Apple Silicon | `DocumentaAI_*_aarch64.dmg` |',
+                '| Windows | `DocumentaAI_*_x64-setup.exe` |',
+                '| Linux | `DocumentaAI_*_amd64.AppImage` |',
+              ].join('\n'),
+              draft: false,
+              prerelease: false,
+            })
+            return String(data.id)
+
   build:
+    needs: create-release
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: macos-latest
             target: aarch64-apple-darwin
-            label: macos-arm
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            label: windows
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
-            label: linux
 
     runs-on: ${{ matrix.os }}
 
@@ -61,17 +89,5 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: DocumentaAI ${{ github.ref_name }}
-          releaseBody: |
-            ## Download
-
-            | Plataforma | Arquivo |
-            |---|---|
-            | macOS Apple Silicon | `DocumentaAI_*_aarch64.dmg` |
-            | Windows | `DocumentaAI_*_x64-setup.exe` |
-            | Linux | `DocumentaAI_*_amd64.AppImage` |
-          releaseDraft: false
-          prerelease: false
+          releaseId: ${{ needs.create-release.outputs.release_id }}
           args: --target ${{ matrix.target }}
-
