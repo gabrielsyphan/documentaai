@@ -49,14 +49,20 @@ jobs:
             target: aarch64-apple-darwin
             artifact_name: documentaai-macos.dmg
             artifact_find: "*/bundle/dmg/*.dmg"
+            updater_find: "*/bundle/macos/*.app.tar.gz"
+            updater_name: documentaai-macos-update.tar.gz
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             artifact_name: documentaai-windows.exe
             artifact_find: "*/bundle/nsis/*-setup.exe"
+            updater_find: "*/bundle/nsis/*.nsis.zip"
+            updater_name: documentaai-windows-update.zip
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             artifact_name: documentaai-linux.AppImage
             artifact_find: "*/bundle/appimage/*.AppImage"
+            updater_find: "*/bundle/appimage/*.AppImage.tar.gz"
+            updater_name: documentaai-linux-update.AppImage.tar.gz
 
     runs-on: ${{ matrix.os }}
 
@@ -97,12 +103,81 @@ jobs:
         with:
           args: --target ${{ matrix.target }}
 
-      - name: Upload artifact
+      - name: Upload installer and updater bundle
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          ARTIFACT=$(find src-tauri/target -path "${{ matrix.artifact_find }}" ! -name "*.sig" | head -1)
-          echo "Artifact: $ARTIFACT"
-          cp "$ARTIFACT" "${{ matrix.artifact_name }}"
-          gh release upload "${{ github.ref_name }}" "${{ matrix.artifact_name }}" --clobber
+          TAG="${{ github.ref_name }}"
+
+          # Installer (DMG / exe / AppImage)
+          INSTALLER=$(find src-tauri/target -path "${{ matrix.artifact_find }}" ! -name "*.sig" | head -1)
+          echo "Installer: $INSTALLER"
+          cp "$INSTALLER" "${{ matrix.artifact_name }}"
+          gh release upload "$TAG" "${{ matrix.artifact_name }}" --clobber
+
+          # Updater bundle + signature
+          UPDATER=$(find src-tauri/target -path "${{ matrix.updater_find }}" ! -name "*.sig" | head -1)
+          echo "Updater: $UPDATER"
+          cp "$UPDATER"      "${{ matrix.updater_name }}"
+          cp "${UPDATER}.sig" "${{ matrix.updater_name }}.sig"
+          gh release upload "$TAG" "${{ matrix.updater_name }}" "${{ matrix.updater_name }}.sig" --clobber
+
+  publish-manifest:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate and upload latest.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.ref_name }}"
+          VERSION="${TAG#v}"
+          BASE="https://github.com/${{ github.repository }}/releases/download/${TAG}"
+
+          SIG_MAC=$(gh release download "$TAG" --repo "${{ github.repository }}" \
+            -p "documentaai-macos-update.tar.gz.sig" --output - 2>/dev/null || echo "")
+          SIG_WIN=$(gh release download "$TAG" --repo "${{ github.repository }}" \
+            -p "documentaai-windows-update.zip.sig" --output - 2>/dev/null || echo "")
+          SIG_LIN=$(gh release download "$TAG" --repo "${{ github.repository }}" \
+            -p "documentaai-linux-update.AppImage.tar.gz.sig" --output - 2>/dev/null || echo "")
+
+          python3 - <<PYEOF
+          import json, sys
+          from datetime import datetime, timezone
+
+          version  = """$VERSION"""
+          tag      = """$TAG"""
+          base     = """$BASE"""
+          sig_mac  = """$SIG_MAC"""
+          sig_win  = """$SIG_WIN"""
+          sig_lin  = """$SIG_LIN"""
+
+          data = {
+            "version": version.strip(),
+            "notes": f"DocumentaAI {tag.strip()}",
+            "pub_date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "platforms": {},
+          }
+
+          entries = [
+            ("darwin-aarch64", sig_mac, f"{base}/documentaai-macos-update.tar.gz"),
+            ("windows-x86_64", sig_win, f"{base}/documentaai-windows-update.zip"),
+            ("linux-x86_64",   sig_lin, f"{base}/documentaai-linux-update.AppImage.tar.gz"),
+          ]
+
+          for platform, sig, url in entries:
+            if sig.strip():
+              data["platforms"][platform] = {"signature": sig.strip(), "url": url}
+
+          if not data["platforms"]:
+            print("ERROR: nenhuma plataforma com assinatura encontrada", file=sys.stderr)
+            sys.exit(1)
+
+          print(json.dumps(data, indent=2))
+          with open("latest.json", "w") as f:
+            json.dump(data, f, indent=2)
+          PYEOF
+
+          gh release upload "$TAG" latest.json --clobber
+          echo "latest.json publicado no release $TAG"

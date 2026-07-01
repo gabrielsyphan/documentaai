@@ -46,7 +46,7 @@
   "plugins": {
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDM0ODA3QkJBN0RERjAyNDQKUldSRUF0OTl1bnVBTkJkdVRISjY0RExsSEMwc214MWhVQllhczREb2hJU2lBeDRLTlcxMGxWM0EK",
-      "endpoints": ["https://documentaai.rovanly.com/updates/latest.json"]
+      "endpoints": ["https://github.com/gabrielsyphan/documentaai/releases/latest/download/latest.json"]
     }
   },
   "bundle": {
