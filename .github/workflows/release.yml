@@ -30,9 +30,9 @@ jobs:
                 '',
                 '| Plataforma | Arquivo |',
                 '|---|---|',
-                '| macOS Apple Silicon | `DocumentaAI_*_aarch64.dmg` |',
-                '| Windows | `DocumentaAI_*_x64-setup.exe` |',
-                '| Linux | `DocumentaAI_*_amd64.AppImage` |',
+                '| macOS Apple Silicon | `documentaai-macos.dmg` |',
+                '| Windows | `documentaai-windows.exe` |',
+                '| Linux | `documentaai-linux.AppImage` |',
               ].join('\n'),
               draft: false,
               prerelease: false,
@@ -47,10 +47,16 @@ jobs:
         include:
           - os: macos-latest
             target: aarch64-apple-darwin
+            artifact_name: documentaai-macos.dmg
+            artifact_find: "*/bundle/dmg/*.dmg"
           - os: windows-latest
             target: x86_64-pc-windows-msvc
+            artifact_name: documentaai-windows.exe
+            artifact_find: "*/bundle/nsis/*-setup.exe"
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
+            artifact_name: documentaai-linux.AppImage
+            artifact_find: "*/bundle/appimage/*.AppImage"
 
     runs-on: ${{ matrix.os }}
 
@@ -89,5 +95,14 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          releaseId: ${{ needs.create-release.outputs.release_id }}
           args: --target ${{ matrix.target }}
+
+      - name: Upload artifact
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ARTIFACT=$(find src-tauri/target -path "${{ matrix.artifact_find }}" ! -name "*.sig" | head -1)
+          echo "Artifact: $ARTIFACT"
+          cp "$ARTIFACT" "${{ matrix.artifact_name }}"
+          gh release upload "${{ github.ref_name }}" "${{ matrix.artifact_name }}" --clobber
