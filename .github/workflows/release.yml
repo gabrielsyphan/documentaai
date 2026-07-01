@@ -49,20 +49,14 @@ jobs:
             target: aarch64-apple-darwin
             artifact_name: documentaai-macos.dmg
             artifact_find: "*/bundle/dmg/*.dmg"
-            updater_find: "*/bundle/macos/*.app.tar.gz"
-            updater_name: documentaai-macos-update.tar.gz
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             artifact_name: documentaai-windows.exe
             artifact_find: "*/bundle/nsis/*-setup.exe"
-            updater_find: "*/bundle/nsis/*.nsis.zip"
-            updater_name: documentaai-windows-update.zip
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             artifact_name: documentaai-linux.AppImage
             artifact_find: "*/bundle/appimage/*.AppImage"
-            updater_find: "*/bundle/appimage/*.AppImage.tar.gz"
-            updater_name: documentaai-linux-update.AppImage.tar.gz
 
     runs-on: ${{ matrix.os }}
 
@@ -94,6 +88,9 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      # tauri-action com releaseId: faz o build, assina e sobe TODOS os artefatos
+      # (instaladores versionados + bundles de update + .sig). Só ele conhece a lógica
+      # de signing; sem releaseId, os bundles de update e .sig não são gerados.
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
@@ -101,27 +98,19 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
+          releaseId: ${{ needs.create-release.outputs.release_id }}
           args: --target ${{ matrix.target }}
 
-      - name: Upload installer and updater bundle
+      # Sobe uma cópia com nome fixo (sem versão) para facilitar download manual
+      - name: Upload simple-named installer
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${{ github.ref_name }}"
-
-          # Installer (DMG / exe / AppImage)
           INSTALLER=$(find src-tauri/target -path "${{ matrix.artifact_find }}" ! -name "*.sig" | head -1)
           echo "Installer: $INSTALLER"
           cp "$INSTALLER" "${{ matrix.artifact_name }}"
-          gh release upload "$TAG" "${{ matrix.artifact_name }}" --clobber
-
-          # Updater bundle + signature
-          UPDATER=$(find src-tauri/target -path "${{ matrix.updater_find }}" ! -name "*.sig" | head -1)
-          echo "Updater: $UPDATER"
-          cp "$UPDATER"      "${{ matrix.updater_name }}"
-          cp "${UPDATER}.sig" "${{ matrix.updater_name }}.sig"
-          gh release upload "$TAG" "${{ matrix.updater_name }}" "${{ matrix.updater_name }}.sig" --clobber
+          gh release upload "${{ github.ref_name }}" "${{ matrix.artifact_name }}" --clobber
 
   publish-manifest:
     needs: build
@@ -132,52 +121,76 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ github.ref_name }}"
-          VERSION="${TAG#v}"
-          BASE="https://github.com/${{ github.repository }}/releases/download/${TAG}"
+          REPO="${{ github.repository }}"
+          BASE="https://github.com/${REPO}/releases/download/${TAG}"
 
-          SIG_MAC=$(gh release download "$TAG" --repo "${{ github.repository }}" \
-            -p "documentaai-macos-update.tar.gz.sig" --output - 2>/dev/null || echo "")
-          SIG_WIN=$(gh release download "$TAG" --repo "${{ github.repository }}" \
-            -p "documentaai-windows-update.zip.sig" --output - 2>/dev/null || echo "")
-          SIG_LIN=$(gh release download "$TAG" --repo "${{ github.repository }}" \
-            -p "documentaai-linux-update.AppImage.tar.gz.sig" --output - 2>/dev/null || echo "")
+          # Descobre os nomes dos .sig que o tauri-action subiu (nomes versionados)
+          SIG_MAC_NAME=$(gh release view "$TAG" --repo "$REPO" --json assets \
+            --jq '[.assets[].name | select(endswith(".app.tar.gz.sig"))] | first // ""')
+          SIG_WIN_NAME=$(gh release view "$TAG" --repo "$REPO" --json assets \
+            --jq '[.assets[].name | select(endswith(".nsis.zip.sig"))] | first // ""')
+          SIG_LIN_NAME=$(gh release view "$TAG" --repo "$REPO" --json assets \
+            --jq '[.assets[].name | select(endswith(".AppImage.tar.gz.sig"))] | first // ""')
 
-          python3 - <<PYEOF
-          import json, sys
-          from datetime import datetime, timezone
+          echo "Mac sig: $SIG_MAC_NAME"
+          echo "Win sig: $SIG_WIN_NAME"
+          echo "Lin sig: $SIG_LIN_NAME"
 
-          version  = """$VERSION"""
-          tag      = """$TAG"""
-          base     = """$BASE"""
-          sig_mac  = """$SIG_MAC"""
-          sig_win  = """$SIG_WIN"""
-          sig_lin  = """$SIG_LIN"""
+          # Baixa o conteúdo dos .sig
+          [ -n "$SIG_MAC_NAME" ] && \
+            SIG_MAC=$(gh release download "$TAG" --repo "$REPO" -p "$SIG_MAC_NAME" --output -) || \
+            SIG_MAC=""
+          [ -n "$SIG_WIN_NAME" ] && \
+            SIG_WIN=$(gh release download "$TAG" --repo "$REPO" -p "$SIG_WIN_NAME" --output -) || \
+            SIG_WIN=""
+          [ -n "$SIG_LIN_NAME" ] && \
+            SIG_LIN=$(gh release download "$TAG" --repo "$REPO" -p "$SIG_LIN_NAME" --output -) || \
+            SIG_LIN=""
 
-          data = {
-            "version": version.strip(),
-            "notes": f"DocumentaAI {tag.strip()}",
-            "pub_date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "platforms": {},
-          }
+          # Exporta para o Python ler via os.environ
+          export TAG="$TAG"
+          export SIG_MAC="$SIG_MAC"
+          export SIG_WIN="$SIG_WIN"
+          export SIG_LIN="$SIG_LIN"
+          export URL_MAC="${BASE}/${SIG_MAC_NAME%.sig}"
+          export URL_WIN="${BASE}/${SIG_WIN_NAME%.sig}"
+          export URL_LIN="${BASE}/${SIG_LIN_NAME%.sig}"
 
-          entries = [
-            ("darwin-aarch64", sig_mac, f"{base}/documentaai-macos-update.tar.gz"),
-            ("windows-x86_64", sig_win, f"{base}/documentaai-windows-update.zip"),
-            ("linux-x86_64",   sig_lin, f"{base}/documentaai-linux-update.AppImage.tar.gz"),
-          ]
+          python3 - <<'PYEOF'
+import json, sys, os
+from datetime import datetime, timezone
 
-          for platform, sig, url in entries:
-            if sig.strip():
-              data["platforms"][platform] = {"signature": sig.strip(), "url": url}
+tag     = os.environ['TAG']
+sig_mac = os.environ.get('SIG_MAC', '')
+sig_win = os.environ.get('SIG_WIN', '')
+sig_lin = os.environ.get('SIG_LIN', '')
+url_mac = os.environ.get('URL_MAC', '')
+url_win = os.environ.get('URL_WIN', '')
+url_lin = os.environ.get('URL_LIN', '')
 
-          if not data["platforms"]:
-            print("ERROR: nenhuma plataforma com assinatura encontrada", file=sys.stderr)
-            sys.exit(1)
+data = {
+  "version": tag.lstrip('v'),
+  "notes": f"DocumentaAI {tag}",
+  "pub_date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+  "platforms": {},
+}
 
-          print(json.dumps(data, indent=2))
-          with open("latest.json", "w") as f:
-            json.dump(data, f, indent=2)
-          PYEOF
+for platform, sig, url in [
+  ("darwin-aarch64", sig_mac, url_mac),
+  ("windows-x86_64", sig_win, url_win),
+  ("linux-x86_64",   sig_lin, url_lin),
+]:
+  if sig.strip() and url.strip():
+    data["platforms"][platform] = {"signature": sig.strip(), "url": url}
+
+if not data["platforms"]:
+  print("ERROR: nenhuma plataforma com assinatura encontrada", file=sys.stderr)
+  sys.exit(1)
+
+print(json.dumps(data, indent=2))
+with open("latest.json", "w") as f:
+  json.dump(data, f, indent=2)
+PYEOF
 
           gh release upload "$TAG" latest.json --clobber
           echo "latest.json publicado no release $TAG"
