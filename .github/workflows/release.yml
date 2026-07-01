@@ -120,12 +120,16 @@ jobs:
           REPO="${{ github.repository }}"
           BASE="https://github.com/${REPO}/releases/download/${TAG}"
 
-          SIG_MAC_NAME=$(gh release view "$TAG" --repo "$REPO" --json assets \
-            --jq '[.assets[].name | select(endswith(".app.tar.gz.sig"))] | .[0] // ""')
-          SIG_WIN_NAME=$(gh release view "$TAG" --repo "$REPO" --json assets \
-            --jq '[.assets[].name | select(endswith(".nsis.zip.sig"))] | .[0] // ""')
-          SIG_LIN_NAME=$(gh release view "$TAG" --repo "$REPO" --json assets \
-            --jq '[.assets[].name | select(endswith(".AppImage.tar.gz.sig"))] | .[0] // ""')
+          # Busca todos os assets de uma vez e filtra com jq separado (gh --jq pode retornar "null" literal)
+          ASSETS=$(gh release view "$TAG" --repo "$REPO" --json assets)
+
+          echo "=== Assets no release ==="
+          echo "$ASSETS" | jq -r '.assets[].name'
+          echo "========================="
+
+          SIG_MAC_NAME=$(echo "$ASSETS" | jq -r '[.assets[].name | select(endswith(".app.tar.gz.sig"))] | .[0] // ""')
+          SIG_WIN_NAME=$(echo "$ASSETS" | jq -r '[.assets[].name | select(endswith(".nsis.zip.sig"))] | .[0] // ""')
+          SIG_LIN_NAME=$(echo "$ASSETS" | jq -r '[.assets[].name | select(endswith(".AppImage.tar.gz.sig"))] | .[0] // ""')
 
           echo "Mac sig: $SIG_MAC_NAME"
           echo "Win sig: $SIG_WIN_NAME"
